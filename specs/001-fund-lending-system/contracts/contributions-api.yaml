@@ -1,0 +1,461 @@
+openapi: 3.1.0
+info:
+  title: FundManager Contributions API
+  description: Monthly contribution dues, payment recording, and fund ledger.
+  version: 1.0.0
+
+servers:
+  - url: /api/funds/{fundId}/contributions
+    description: Fund-scoped via API Gateway
+
+tags:
+  - name: Dues
+    description: Contribution due management
+  - name: Payments
+    description: Payment recording
+  - name: Ledger
+    description: Fund transaction ledger
+
+paths:
+  /dues:
+    get:
+      operationId: listDues
+      summary: List contribution dues for the fund
+      description: Returns paginated contribution dues, filterable by month, user, and status.
+      tags: [Dues]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: monthYear
+          in: query
+          description: Filter by YYYYMM (e.g., 202602)
+          schema:
+            type: integer
+        - name: userId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Pending, Paid, Partial, Late, Missed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Paginated dues list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDuesList'
+
+  /dues/{dueId}:
+    get:
+      operationId: getDue
+      summary: Get a specific contribution due
+      tags: [Dues]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: dueId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Contribution due detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContributionDue'
+        '404':
+          description: Due not found
+
+  /dues/generate:
+    post:
+      operationId: generateDues
+      summary: Trigger monthly contribution due generation
+      description: >
+        Generates contribution dues for all active members for the specified month.
+        Idempotent — re-running for the same month does not create duplicates (NFR-011).
+        Typically triggered by a scheduled job, but can be invoked manually by Platform Admin.
+      tags: [Dues]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [monthYear]
+              properties:
+                monthYear:
+                  type: integer
+                  description: YYYYMM format (e.g., 202602)
+      responses:
+        '200':
+          description: Dues generated (or already exist)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  generated:
+                    type: integer
+                    description: Number of dues created
+                  skipped:
+                    type: integer
+                    description: Number already existing (idempotent)
+        '409':
+          description: Fund is not in Active state
+
+  /payments:
+    post:
+      operationId: recordPayment
+      summary: Record a contribution payment
+      description: >
+        Records a payment for a specific contribution due. Requires Idempotency-Key header (FR-114).
+        Uses optimistic concurrency — returns 409 if the due was modified since last read (FR-035a).
+      tags: [Payments]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Client-generated unique key for deduplication
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: ETag (xmin version) of the ContributionDue for optimistic concurrency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordPaymentRequest'
+      responses:
+        '200':
+          description: Payment recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResult'
+        '409':
+          description: Concurrency conflict — due was modified; refresh and retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: Validation error (amount ≤ 0, due already Paid, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /ledger:
+    get:
+      operationId: getLedger
+      summary: Get fund transaction ledger
+      description: Returns all transactions for the fund, sorted by date descending. Filterable by type, user, and date range.
+      tags: [Ledger]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [Contribution, Disbursement, Repayment, InterestIncome, Penalty, Settlement]
+        - name: userId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: fromDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Paginated transaction ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLedger'
+
+  /summary:
+    get:
+      operationId: getContributionSummary
+      summary: Get contribution summary for a fund
+      description: Aggregate contribution stats for a given month — total collected, outstanding, member-wise status.
+      tags: [Dues]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: monthYear
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Contribution summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContributionSummary'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ContributionDue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        monthYear:
+          type: integer
+        amountDue:
+          type: number
+        amountPaid:
+          type: number
+        remainingBalance:
+          type: number
+        status:
+          type: string
+          enum: [Pending, Paid, Partial, Late, Missed]
+        dueDate:
+          type: string
+          format: date
+        paidDate:
+          type: string
+          format: date-time
+          nullable: true
+        version:
+          type: string
+          description: ETag for optimistic concurrency (xmin)
+
+    PaginatedDuesList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContributionDue'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    RecordPaymentRequest:
+      type: object
+      required: [dueId, amount]
+      properties:
+        dueId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+        description:
+          type: string
+          nullable: true
+
+    PaymentResult:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        dueId:
+          type: string
+          format: uuid
+        amountPaid:
+          type: number
+        remainingBalance:
+          type: number
+        newStatus:
+          type: string
+          enum: [Pending, Paid, Partial, Late, Missed]
+        receiptUrl:
+          type: string
+          nullable: true
+
+    TransactionEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        type:
+          type: string
+          enum: [Contribution, Disbursement, Repayment, InterestIncome, Penalty, Settlement]
+        amount:
+          type: number
+        description:
+          type: string
+          nullable: true
+        referenceEntityType:
+          type: string
+          nullable: true
+        referenceEntityId:
+          type: string
+          format: uuid
+          nullable: true
+        recordedBy:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    PaginatedLedger:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionEntry'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    ContributionSummary:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        monthYear:
+          type: integer
+        totalDue:
+          type: number
+        totalCollected:
+          type: number
+        totalOutstanding:
+          type: number
+        paidCount:
+          type: integer
+        partialCount:
+          type: integer
+        pendingCount:
+          type: integer
+        lateCount:
+          type: integer
+        missedCount:
+          type: integer
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

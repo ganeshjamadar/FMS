@@ -1,0 +1,6 @@
+@FundManager.Dissolution_HostAddress = http://localhost:5137
+
+GET {{FundManager.Dissolution_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

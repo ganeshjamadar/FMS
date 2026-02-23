@@ -1,0 +1,81 @@
+# ──────────────────────────────────────────────
+# .gitignore — FundManager
+# ──────────────────────────────────────────────
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+
+# VS Code / IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js / Frontend
+node_modules/
+dist/
+build/
+.cache/
+*.tsbuildinfo
+.turbo/
+.next/
+.expo/
+.expo-shared/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.sample
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+
+# Docker
+docker-compose.override.yml
+
+# Coverage & Testing
+coverage/
+*.lcov
+TestResults/
+
+# EF Core
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+*.pfx
+*.key
+*.pem
+
+# Misc
+*.log

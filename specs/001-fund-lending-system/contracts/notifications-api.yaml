@@ -1,0 +1,241 @@
+openapi: 3.1.0
+info:
+  title: FundManager Notifications API
+  description: Notification delivery, user preferences, and device token management.
+  version: 1.0.0
+
+servers:
+  - url: /api/notifications
+    description: Via API Gateway
+
+tags:
+  - name: Notifications
+    description: Notification feed and management
+  - name: Preferences
+    description: User notification preferences
+  - name: Devices
+    description: Push notification device tokens
+
+paths:
+  /feed:
+    get:
+      operationId: getNotificationFeed
+      summary: Get current user's notification feed
+      description: Returns in-app notifications for the user, optionally filtered by fund.
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: fundId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Optional fund filter
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Pending, Sent, Failed]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Notification feed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationFeed'
+
+  /feed/unread-count:
+    get:
+      operationId: getUnreadCount
+      summary: Get count of unread/pending notifications
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+
+  /preferences:
+    get:
+      operationId: getPreferences
+      summary: Get current user's notification preferences
+      tags: [Preferences]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Notification preferences
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationPreference'
+
+    put:
+      operationId: updatePreferences
+      summary: Update notification preferences
+      description: Enable/disable notification channels (FR-102).
+      tags: [Preferences]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/UpdatePreferenceRequest'
+      responses:
+        '200':
+          description: Preferences updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationPreference'
+
+  /devices:
+    post:
+      operationId: registerDevice
+      summary: Register a device for push notifications
+      tags: [Devices]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDeviceRequest'
+      responses:
+        '200':
+          description: Device registered or updated
+
+    delete:
+      operationId: unregisterDevice
+      summary: Unregister a device token
+      tags: [Devices]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId]
+              properties:
+                deviceId:
+                  type: string
+      responses:
+        '204':
+          description: Device unregistered
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    NotificationFeedItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+          nullable: true
+        fundName:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          enum: [push, email, sms, in_app]
+        templateKey:
+          type: string
+        title:
+          type: string
+          description: Rendered notification title
+        body:
+          type: string
+          description: Rendered notification body
+        status:
+          type: string
+          enum: [Pending, Sent, Failed]
+        scheduledAt:
+          type: string
+          format: date-time
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PaginatedNotificationFeed:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationFeedItem'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    NotificationPreference:
+      type: object
+      properties:
+        channel:
+          type: string
+          enum: [push, email, sms, in_app]
+        enabled:
+          type: boolean
+
+    UpdatePreferenceRequest:
+      type: object
+      required: [channel, enabled]
+      properties:
+        channel:
+          type: string
+          enum: [push, email, sms, in_app]
+        enabled:
+          type: boolean
+
+    RegisterDeviceRequest:
+      type: object
+      required: [deviceId, pushToken, platform]
+      properties:
+        deviceId:
+          type: string
+        pushToken:
+          type: string
+        platform:
+          type: string
+          enum: [ios, android]

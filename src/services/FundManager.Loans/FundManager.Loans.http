@@ -1,0 +1,6 @@
+@FundManager.Loans_HostAddress = http://localhost:5258
+
+GET {{FundManager.Loans_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

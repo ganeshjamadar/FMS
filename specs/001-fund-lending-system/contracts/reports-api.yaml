@@ -1,0 +1,405 @@
+openapi: 3.1.0
+info:
+  title: FundManager Reports API
+  description: >
+    Fund-level and member-level report generation and export.
+    Reports are served by the API Gateway, aggregating data from Contributions, Loans, and Dissolution services.
+  version: 1.0.0
+
+servers:
+  - url: /api/funds/{fundId}/reports
+    description: Fund-scoped via API Gateway
+
+tags:
+  - name: FundReports
+    description: Fund-level reports
+  - name: MemberReports
+    description: Member-level reports
+
+paths:
+  /contribution-summary:
+    get:
+      operationId: getContributionReport
+      summary: Monthly contribution summary report
+      description: Shows each member's payment status, totals collected, and outstanding for a date range.
+      tags: [FundReports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: fromMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: YYYYMM
+        - name: toMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: YYYYMM
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+      responses:
+        '200':
+          description: Contribution report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContributionReport'
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+
+  /loan-portfolio:
+    get:
+      operationId: getLoanPortfolioReport
+      summary: Loan portfolio report
+      description: Active loans with outstanding balances, interest accrued, and repayment status.
+      tags: [FundReports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+      responses:
+        '200':
+          description: Loan portfolio report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanPortfolioReport'
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+
+  /interest-earnings:
+    get:
+      operationId: getInterestEarningsReport
+      summary: Interest earnings report
+      description: Monthly breakdown of interest earned from all loans.
+      tags: [FundReports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: fromMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: toMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+      responses:
+        '200':
+          description: Interest earnings report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterestEarningsReport'
+
+  /balance-sheet:
+    get:
+      operationId: getBalanceSheet
+      summary: Fund balance sheet
+      description: >
+        Opening balance, contributions, disbursements, interest earned, repayments,
+        penalties, and closing balance for the period (Constitution IV).
+      tags: [FundReports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: fromMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: toMonth
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+      responses:
+        '200':
+          description: Balance sheet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceSheet'
+
+  /member/{userId}/statement:
+    get:
+      operationId: getMemberStatement
+      summary: Personal member statement
+      description: Contribution history, loan history, and projected dissolution payout (FR-091).
+      tags: [MemberReports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, pdf, csv]
+            default: json
+      responses:
+        '200':
+          description: Member statement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemberStatement'
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    ContributionReport:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        fundName:
+          type: string
+        fromMonth:
+          type: integer
+        toMonth:
+          type: integer
+        totalDue:
+          type: number
+        totalCollected:
+          type: number
+        totalOutstanding:
+          type: number
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              userId:
+                type: string
+                format: uuid
+              name:
+                type: string
+              monthlyAmount:
+                type: number
+              months:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    monthYear:
+                      type: integer
+                    amountDue:
+                      type: number
+                    amountPaid:
+                      type: number
+                    status:
+                      type: string
+
+    LoanPortfolioReport:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        totalActiveLoans:
+          type: integer
+        totalOutstandingPrincipal:
+          type: number
+        totalInterestAccrued:
+          type: number
+        loans:
+          type: array
+          items:
+            type: object
+            properties:
+              loanId:
+                type: string
+                format: uuid
+              borrowerName:
+                type: string
+              principalAmount:
+                type: number
+              outstandingPrincipal:
+                type: number
+              interestEarned:
+                type: number
+              monthlyInterestRate:
+                type: number
+              status:
+                type: string
+              disbursementDate:
+                type: string
+                format: date-time
+              nextRepaymentDue:
+                type: number
+                nullable: true
+
+    InterestEarningsReport:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        totalInterestEarned:
+          type: number
+        months:
+          type: array
+          items:
+            type: object
+            properties:
+              monthYear:
+                type: integer
+              interestEarned:
+                type: number
+              loanCount:
+                type: integer
+
+    BalanceSheet:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        fundName:
+          type: string
+        fromMonth:
+          type: integer
+        toMonth:
+          type: integer
+        openingBalance:
+          type: number
+        contributionsReceived:
+          type: number
+        disbursements:
+          type: number
+        interestEarned:
+          type: number
+        repaymentsReceived:
+          type: number
+        penalties:
+          type: number
+        closingBalance:
+          type: number
+
+    MemberStatement:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        fundId:
+          type: string
+          format: uuid
+        fundName:
+          type: string
+        monthlyContributionAmount:
+          type: number
+        joinDate:
+          type: string
+          format: date
+        contributionHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              monthYear:
+                type: integer
+              amountDue:
+                type: number
+              amountPaid:
+                type: number
+              status:
+                type: string
+        totalContributionsPaid:
+          type: number
+        loanHistory:
+          type: array
+          items:
+            type: object
+            properties:
+              loanId:
+                type: string
+                format: uuid
+              principalAmount:
+                type: number
+              outstandingPrincipal:
+                type: number
+              totalInterestPaid:
+                type: number
+              status:
+                type: string
+        projectedDissolutionPayout:
+          type: object
+          nullable: true
+          properties:
+            interestShare:
+              type: number
+            grossPayout:
+              type: number
+            deductions:
+              type: number
+            netPayout:
+              type: number

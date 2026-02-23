@@ -1,0 +1,228 @@
+openapi: 3.1.0
+info:
+  title: FundManager Audit API
+  description: Audit trail querying. Append-only — no create/update/delete endpoints.
+  version: 1.0.0
+
+servers:
+  - url: /api/funds/{fundId}/audit
+    description: Fund-scoped via API Gateway
+
+tags:
+  - name: AuditLogs
+    description: Audit log queries
+
+paths:
+  /logs:
+    get:
+      operationId: listAuditLogs
+      summary: Query audit logs for a fund (Fund Admin only)
+      description: >
+        Returns paginated, filterable audit log entries for the specified fund.
+        Always include date range for partition pruning.
+      tags: [AuditLogs]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: fromDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Start date (inclusive) — required for partition pruning
+        - name: toDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: End date (exclusive) — required for partition pruning
+        - name: actorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: actionType
+          in: query
+          schema:
+            type: string
+          description: e.g., 'Fund.Created', 'Loan.Approved'
+        - name: entityType
+          in: query
+          schema:
+            type: string
+          description: e.g., 'Fund', 'Loan', 'ContributionDue'
+        - name: entityId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        '200':
+          description: Paginated audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditLogs'
+        '403':
+          description: Not Fund Admin
+
+  /logs/{logId}:
+    get:
+      operationId: getAuditLog
+      summary: Get a specific audit log entry with full before/after state
+      tags: [AuditLogs]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: logId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Audit log entry with full details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogDetail'
+        '404':
+          description: Log entry not found
+
+  /entity-history:
+    get:
+      operationId: getEntityHistory
+      summary: Get audit trail for a specific entity
+      description: Returns all state changes for a given entity type + ID, sorted chronologically.
+      tags: [AuditLogs]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: entityType
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: entityId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: fromDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Chronological entity history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLogDetail'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    AuditLogSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        actorName:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        actionType:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: string
+          format: uuid
+        serviceName:
+          type: string
+
+    AuditLogDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/AuditLogSummary'
+        - type: object
+          properties:
+            beforeState:
+              type: object
+              nullable: true
+              description: JSON snapshot before the change (null for CREATE)
+            afterState:
+              type: object
+              description: JSON snapshot after the change
+            ipAddress:
+              type: string
+              nullable: true
+            userAgent:
+              type: string
+              nullable: true
+            correlationId:
+              type: string
+              format: uuid
+              nullable: true
+
+    PaginatedAuditLogs:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLogSummary'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer

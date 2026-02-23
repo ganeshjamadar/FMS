@@ -1,0 +1,104 @@
+# ──────────────────────────────────────────────────────────────
+# FundManager — Development Overrides
+# Usage (infra-only mode — run services on host with hot reload):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up postgres rabbitmq redis
+#
+# Usage (full stack with debug ports):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+# ──────────────────────────────────────────────────────────────
+
+services:
+
+  # ────────── Infrastructure (expose ports for host-based dev) ──────────
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # Management UI: http://localhost:15672
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  # ────────── Microservices (expose individual ports for debugging) ──────────
+
+  identity:
+    ports:
+      - "5010:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  fundadmin:
+    ports:
+      - "5020:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  contributions:
+    ports:
+      - "5030:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  loans:
+    ports:
+      - "5040:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  dissolution:
+    ports:
+      - "5050:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  notifications:
+    ports:
+      - "5060:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  audit:
+    ports:
+      - "5070:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+
+  # ────────── Gateway (debug port) ──────────
+
+  gateway:
+    ports:
+      - "5000:8080"
+
+  # ────────── Web (dev port) ──────────
+
+  web:
+    ports:
+      - "3000:80"
+
+# ──────────────────────────────────────────────────────────────
+# Host-based development (services NOT in containers):
+#
+# 1. Start infra only:
+#    docker compose -f docker-compose.yml -f docker-compose.dev.yml up postgres rabbitmq redis
+#
+# 2. Start each .NET service with hot reload:
+#    cd src/services/FundManager.Identity && dotnet watch run
+#    cd src/services/FundManager.FundAdmin && dotnet watch run
+#    cd src/services/FundManager.Contributions && dotnet watch run
+#    cd src/services/FundManager.Loans && dotnet watch run
+#    cd src/services/FundManager.Dissolution && dotnet watch run
+#    cd src/services/FundManager.Notifications && dotnet watch run
+#    cd src/services/FundManager.Audit && dotnet watch run
+#    cd src/gateway/FundManager.ApiGateway && dotnet watch run
+#
+# 3. Start web dev server:
+#    cd src/web/fund-manager-web && npm run dev
+#
+# 4. Start mobile dev server:
+#    cd src/mobile/fund-manager-mobile && npx expo start
+# ──────────────────────────────────────────────────────────────

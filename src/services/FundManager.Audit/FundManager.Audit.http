@@ -1,0 +1,6 @@
+@FundManager.Audit_HostAddress = http://localhost:5058
+
+GET {{FundManager.Audit_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

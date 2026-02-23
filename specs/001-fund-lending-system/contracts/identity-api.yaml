@@ -1,0 +1,546 @@
+openapi: 3.1.0openapi: 3.1.0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+          type: string        instance:          type: string        detail:          type: integer        status:          type: string        title:          type: string        type:      properties:      type: object    ProblemDetails:          enum: [Draft, Active, Dissolving, Dissolved]          type: string        fundState:          enum: [Admin, Editor, Guest]          type: string        role:          type: string        fundName:          format: uuid          type: string        fundId:      properties:      type: object    FundMembership:          nullable: true          type: string        profilePictureUrl:          nullable: true          type: string        email:          nullable: true          type: string        phone:          maxLength: 255          type: string        name:      properties:      type: object    UpdateProfileRequest:          format: date-time          type: string        createdAt:          type: boolean        isActive:          nullable: true          type: string        profilePictureUrl:          nullable: true          type: string        email:          nullable: true          type: string        phone:          type: string        name:          format: uuid          type: string        id:      properties:      type: object    UserProfile:          $ref: '#/components/schemas/UserProfile'        user:          format: date-time          type: string        expiresAt:          type: string        accessToken:      properties:      type: object    AuthTokenResponse:          maxLength: 6          minLength: 6          type: string        otp:          format: uuid          type: string        challengeId:      properties:      required: [challengeId, otp]      type: object    OtpVerifyRequest:          format: date-time          type: string        expiresAt:          format: uuid          type: string        challengeId:      properties:      type: object    OtpRequestResponse:          description: Phone number (E.164) or email address          type: string        target:          enum: [phone, email]          type: string        channel:      properties:      required: [channel, target]      type: object    OtpRequest:  schemas:      bearerFormat: JWT      scheme: bearer      type: http    BearerAuth:  securitySchemes:components:                  $ref: '#/components/schemas/FundMembership'                items:                type: array              schema:            application/json:          content:          description: List of fund memberships        '200':      responses:        - BearerAuth: []      security:      tags: [Profile]      description: Returns fund ID, name, role, and state for each fund the user is a member of.      summary: List all funds the current user belongs to      operationId: getMyFunds    get:  /profile/funds:                $ref: '#/components/schemas/ProblemDetails'              schema:            application/json:          content:          description: Validation error        '422':                $ref: '#/components/schemas/UserProfile'              schema:            application/json:          content:          description: Updated profile        '200':      responses:              $ref: '#/components/schemas/UpdateProfileRequest'            schema:          application/json:        content:        required: true      requestBody:        - BearerAuth: []      security:      tags: [Profile]      description: Update name, phone, email, and profile picture.      summary: Update current user profile      operationId: updateProfile    put:                $ref: '#/components/schemas/UserProfile'              schema:            application/json:          content:          description: User profile        '200':      responses:        - BearerAuth: []      security:      tags: [Profile]      summary: Get current user profile      operationId: getProfile    get:  /profile:          description: Session revoked        '204':      responses:        - BearerAuth: []      security:      tags: [Auth]      summary: Revoke current session      operationId: logout    post:  /auth/logout:                $ref: '#/components/schemas/ProblemDetails'              schema:            application/json:          content:          description: Invalid or expired OTP        '401':                $ref: '#/components/schemas/AuthTokenResponse'              schema:            application/json:          content:          description: OTP verified, session token issued        '200':      responses:              $ref: '#/components/schemas/OtpVerifyRequest'            schema:          application/json:        content:        required: true      requestBody:      tags: [Auth]        OTP expires after 5 minutes (NFR-004). Max 3 attempts per challenge.        Verifies the OTP and, on success, returns a session token.      description: >      summary: Verify OTP and obtain session token      operationId: verifyOtp    post:  /auth/otp/verify:                $ref: '#/components/schemas/ProblemDetails'              schema:            application/json:          content:          description: Rate limit exceeded        '429':                $ref: '#/components/schemas/OtpRequestResponse'              schema:            application/json:          content:          description: OTP sent successfully        '200':      responses:              $ref: '#/components/schemas/OtpRequest'            schema:          application/json:        content:        required: true      requestBody:      tags: [Auth]        Rate-limited to 5 requests per phone/email per 15 minutes (NFR-006).        Sends a one-time password to the specified phone or email.      description: >      summary: Request an OTP for login      operationId: requestOtp    post:  /auth/otp/request:paths:    description: User profile management  - name: Profile    description: OTP-based authentication  - name: Authtags:    description: Via API Gateway  - url: /api/identityservers:    name: FundManager Team  contact:  version: 1.0.0  description: Authentication, sessions, and user profile management.  title: FundManager Identity APIinfo:info:
+  title: FundManager Identity API
+  description: |
+    Authentication, session management, and user profile operations.
+    OTP-based passwordless authentication for phone and email.
+  version: 1.0.0
+  contact:
+    name: FundManager Team
+
+servers:
+  - url: http://localhost:5001
+    description: Local development
+
+tags:
+  - name: Auth
+    description: OTP authentication flow
+  - name: Profile
+    description: User profile management
+  - name: Sessions
+    description: Session management
+
+paths:
+  /api/auth/otp/request:
+    post:
+      operationId: requestOtp
+      tags: [Auth]
+      summary: Request OTP for login
+      description: |
+        Sends a one-time password to the specified phone or email.
+        Rate-limited to 5 requests per phone/email per 15 minutes (NFR-006).
+        OTP expires in 5 minutes (NFR-004).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpRequest'
+      responses:
+        '202':
+          description: OTP sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpRequestResponse'
+        '429':
+          description: Rate limit exceeded (max 5 per 15 min)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      tags: [Auth]
+      summary: Verify OTP and obtain session token
+      description: |
+        Validates the OTP and returns a session token on success.
+        Session token expires after 24 hours of inactivity (NFR-005).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid or expired OTP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Revoke current session
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Session revoked
+        '401':
+          description: Not authenticated
+
+  /api/profile/me:
+    get:
+      operationId: getMyProfile
+      tags: [Profile]
+      summary: Get current user's profile
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Not authenticated
+    put:
+      operationId: updateMyProfile
+      tags: [Profile]
+      summary: Update current user's profile
+      description: Updatable fields are name, phone, email, profile picture URL.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: Not authenticated
+
+  /api/profile/me/funds:
+    get:
+      operationId: getMyFunds
+      tags: [Profile]
+      summary: List all funds the current user belongs to
+      description: Returns fund ID, name, role, and state for each membership.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of fund memberships
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FundMembership'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    OtpRequest:
+      type: object
+      required: [channel, target]
+      properties:
+        channel:
+          type: string
+          enum: [phone, email]
+        target:
+          type: string
+          description: Phone number (E.164) or email address
+          examples: ['+919876543210', 'user@example.com']
+
+    OtpRequestResponse:
+      type: object
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+          examples: ['OTP sent to +91****3210']
+
+    OtpVerifyRequest:
+      type: object
+      required: [challengeId, otp]
+      properties:
+        challengeId:
+          type: string
+          format: uuid
+        otp:
+          type: string
+          minLength: 6
+          maxLength: 6
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Bearer token for subsequent API calls
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        profilePictureUrl:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        phone:
+          type: string
+          maxLength: 20
+          nullable: true
+        email:
+          type: string
+          format: email
+          nullable: true
+        profilePictureUrl:
+          type: string
+          nullable: true
+
+    FundMembership:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        fundName:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Editor, Guest]
+        fundState:
+          type: string
+          enum: [Draft, Active, Dissolving, Dissolved]
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        traceId:
+          type: string

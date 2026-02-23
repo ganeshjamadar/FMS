@@ -1,0 +1,6 @@
+@FundManager.FundAdmin_HostAddress = http://localhost:5237
+
+GET {{FundManager.FundAdmin_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

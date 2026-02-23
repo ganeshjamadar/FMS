@@ -1,0 +1,245 @@
+openapi: 3.1.0
+info:
+  title: FundManager Dissolution API
+  description: Fund dissolution, settlement calculation, and confirmation.
+  version: 1.0.0
+
+servers:
+  - url: /api/funds/{fundId}/dissolution
+    description: Fund-scoped via API Gateway
+
+tags:
+  - name: Dissolution
+    description: Dissolution and settlement management
+
+paths:
+  /initiate:
+    post:
+      operationId: initiateDissolution
+      summary: Initiate fund dissolution (Fund Admin only)
+      description: >
+        Transitions fund from Active to Dissolving. Blocks new members, loans,
+        and contributions (FR-080, FR-081). Active loans continue repayments (FR-081a).
+      tags: [Dissolution]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Dissolution initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DissolutionSettlement'
+        '409':
+          description: Fund not in Active state or has unresolvable conditions
+
+  /settlement:
+    get:
+      operationId: getSettlement
+      summary: Get current settlement calculation
+      description: Returns the settlement overview with per-member breakdown.
+      tags: [Dissolution]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Settlement details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementDetail'
+        '404':
+          description: No dissolution in progress
+
+  /settlement/recalculate:
+    post:
+      operationId: recalculateSettlement
+      summary: Recalculate settlement (after loan repayments or due payments)
+      description: >
+        Re-runs the settlement formula after members have paid obligations.
+        Typically used when dissolution was initially blocked.
+      tags: [Dissolution]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Recalculated settlement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementDetail'
+
+  /confirm:
+    post:
+      operationId: confirmDissolution
+      summary: Confirm dissolution and finalise (Fund Admin only)
+      description: >
+        Confirms dissolution — transitions fund to Dissolved (read-only).
+        Blocked if any member's netPayout < 0 (FR-083).
+      tags: [Dissolution]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Dissolution confirmed, fund is now Dissolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DissolutionSettlement'
+        '409':
+          description: One or more members have negative net payout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DissolutionBlockedError'
+
+  /report:
+    get:
+      operationId: getSettlementReport
+      summary: Download settlement report
+      description: Returns settlement report as PDF or CSV (FR-086).
+      tags: [Dissolution]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [pdf, csv]
+      responses:
+        '200':
+          description: Settlement report file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+        '404':
+          description: No settlement exists
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    DissolutionSettlement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+        totalInterestPool:
+          type: number
+        totalContributionsCollected:
+          type: number
+        status:
+          type: string
+          enum: [Calculating, Reviewed, Confirmed]
+        settlementDate:
+          type: string
+          format: date
+          nullable: true
+        confirmedBy:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SettlementDetail:
+      type: object
+      properties:
+        settlement:
+          $ref: '#/components/schemas/DissolutionSettlement'
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/DissolutionLineItem'
+        canConfirm:
+          type: boolean
+          description: True if all net payouts ≥ 0
+        blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DissolutionBlocker'
+          description: Members blocking dissolution (empty if canConfirm=true)
+
+    DissolutionLineItem:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        monthlyContributionAmount:
+          type: number
+        totalPaidContributions:
+          type: number
+        interestShare:
+          type: number
+        outstandingLoanPrincipal:
+          type: number
+        unpaidInterest:
+          type: number
+        unpaidDues:
+          type: number
+        grossPayout:
+          type: number
+        netPayout:
+          type: number
+
+    DissolutionBlocker:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        netPayout:
+          type: number
+          description: Negative value indicating shortfall
+        outstandingAmount:
+          type: number
+          description: Total amount that needs to be resolved
+
+    DissolutionBlockedError:
+      type: object
+      properties:
+        message:
+          type: string
+        blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DissolutionBlocker'

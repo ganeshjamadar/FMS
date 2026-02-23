@@ -1,0 +1,6 @@
+@FundManager.ApiGateway_HostAddress = http://localhost:5070
+
+GET {{FundManager.ApiGateway_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

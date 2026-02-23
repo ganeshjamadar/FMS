@@ -1,0 +1,648 @@
+openapi: 3.1.0
+info:
+  title: FundManager Fund Admin API
+  description: Fund lifecycle, membership, roles, and invitations.
+  version: 1.0.0
+
+servers:
+  - url: /api/fundadmin
+    description: Via API Gateway
+
+tags:
+  - name: Funds
+    description: Fund CRUD and lifecycle
+  - name: Members
+    description: Membership and role management
+  - name: Invitations
+    description: Member invitations
+
+paths:
+  /funds:
+    get:
+      operationId: listFunds
+      summary: List funds (Platform Admin sees all; users see their funds)
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [Draft, Active, Dissolving, Dissolved]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated fund list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFundList'
+
+    post:
+      operationId: createFund
+      summary: Create a new fund (Platform Admin only)
+      description: Creates a fund in Draft state with all configuration. Config fields are editable while the fund is in Draft state. Once activated, all config fields except description become immutable.
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFundRequest'
+      responses:
+        '201':
+          description: Fund created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fund'
+        '403':
+          description: Not a Platform Administrator
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /funds/{fundId}:
+    get:
+      operationId: getFund
+      summary: Get fund details
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Fund details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fund'
+        '404':
+          description: Fund not found
+
+    patch:
+      operationId: updateFund
+      summary: Update fund fields (description always; config fields only in Draft state)
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFundRequest'
+      responses:
+        '200':
+          description: Fund updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fund'
+        '403':
+          description: Not Fund Admin
+        '409':
+          description: Config fields cannot be modified — fund is not in Draft state
+        '422':
+          description: Validation error
+
+  /funds/{fundId}/activate:
+    post:
+      operationId: activateFund
+      summary: Transition fund from Draft to Active (Platform Admin)
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Fund activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fund'
+        '409':
+          description: Invalid state transition or fund has no Admin
+
+  /funds/{fundId}/dashboard:
+    get:
+      operationId: getFundDashboard
+      summary: Get fund dashboard summary
+      description: Returns aggregated fund metrics — balance, member count, active loans, overdue count.
+      tags: [Funds]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FundDashboard'
+
+  /funds/{fundId}/members:
+    get:
+      operationId: listMembers
+      summary: List fund members with roles
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Paginated member list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMemberList'
+
+  /funds/{fundId}/members/{userId}:
+    delete:
+      operationId: removeMember
+      summary: Remove a member from the fund
+      description: Blocked if member has outstanding loans or unpaid current-cycle dues (FR-024).
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Member removed
+        '409':
+          description: Member has outstanding obligations
+
+  /funds/{fundId}/members/{userId}/role:
+    put:
+      operationId: changeRole
+      summary: Change a member's role
+      description: Fund Admin can change roles. Cannot demote last Admin (FR-015).
+      tags: [Members]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRoleRequest'
+      responses:
+        '200':
+          description: Role updated
+        '409':
+          description: Cannot demote last Admin
+
+  /funds/{fundId}/invitations:
+    get:
+      operationId: listInvitations
+      summary: List pending invitations for a fund
+      tags: [Invitations]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      responses:
+        '200':
+          description: Invitation list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Invitation'
+
+    post:
+      operationId: inviteMember
+      summary: Invite a user to the fund by phone or email
+      tags: [Invitations]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteMemberRequest'
+      responses:
+        '201':
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+
+  /invitations/{invitationId}/accept:
+    post:
+      operationId: acceptInvitation
+      summary: Accept a fund invitation and set contribution amount
+      tags: [Invitations]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptInvitationRequest'
+      responses:
+        '200':
+          description: Invitation accepted, membership created
+        '409':
+          description: Invitation expired or already responded
+        '422':
+          description: Contribution amount below fund minimum
+
+  /invitations/{invitationId}/decline:
+    post:
+      operationId: declineInvitation
+      summary: Decline a fund invitation
+      tags: [Invitations]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invitation declined
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateFundRequest:
+      type: object
+      required: [name, monthlyInterestRate, minimumMonthlyContribution]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        monthlyInterestRate:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+          maximum: 1
+          description: e.g., 0.02 for 2%
+        minimumMonthlyContribution:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+        minimumPrincipalPerRepayment:
+          type: number
+          format: decimal
+          default: 1000.00
+          exclusiveMinimum: 0
+        loanApprovalPolicy:
+          type: string
+          enum: [AdminOnly, AdminWithVoting]
+          default: AdminOnly
+        maxLoanPerMember:
+          type: number
+          format: decimal
+          nullable: true
+        maxConcurrentLoans:
+          type: integer
+          nullable: true
+        dissolutionPolicy:
+          type: string
+          nullable: true
+        overduePenaltyType:
+          type: string
+          enum: [None, Flat, Percentage]
+          default: None
+        overduePenaltyValue:
+          type: number
+          format: decimal
+          default: 0.00
+        contributionDayOfMonth:
+          type: integer
+          minimum: 1
+          maximum: 28
+          default: 1
+        gracePeriodDays:
+          type: integer
+          minimum: 0
+          default: 5
+
+    UpdateFundRequest:
+      type: object
+      description: |
+        Update fund fields. Description is always updatable.
+        All other config fields are only accepted when the fund is in Draft state.
+        Sending config fields for an Active/Dissolving/Dissolved fund returns 409 Conflict.
+      properties:
+        description:
+          type: string
+          nullable: true
+        name:
+          type: string
+          maxLength: 255
+        monthlyInterestRate:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 1
+        minimumMonthlyContribution:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        minimumPrincipalPerRepayment:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        currency:
+          type: string
+        loanApprovalPolicy:
+          type: string
+          enum: [AdminOnly, AdminWithVoting]
+        maxLoanPerMember:
+          type: number
+          nullable: true
+          minimum: 0
+          exclusiveMinimum: true
+        clearMaxLoanPerMember:
+          type: boolean
+          description: Set to true to remove the max loan per member limit
+        maxConcurrentLoans:
+          type: integer
+          nullable: true
+          minimum: 1
+        clearMaxConcurrentLoans:
+          type: boolean
+          description: Set to true to remove the max concurrent loans limit
+        dissolutionPolicy:
+          type: string
+        overduePenaltyType:
+          type: string
+          enum: [None, Flat, Percentage]
+        overduePenaltyValue:
+          type: number
+          minimum: 0
+        contributionDayOfMonth:
+          type: integer
+          minimum: 1
+          maximum: 28
+        gracePeriodDays:
+          type: integer
+          minimum: 0
+
+    Fund:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        currency:
+          type: string
+        monthlyInterestRate:
+          type: number
+        minimumMonthlyContribution:
+          type: number
+        minimumPrincipalPerRepayment:
+          type: number
+        loanApprovalPolicy:
+          type: string
+        maxLoanPerMember:
+          type: number
+          nullable: true
+        maxConcurrentLoans:
+          type: integer
+          nullable: true
+        overduePenaltyType:
+          type: string
+        overduePenaltyValue:
+          type: number
+        contributionDayOfMonth:
+          type: integer
+        gracePeriodDays:
+          type: integer
+        state:
+          type: string
+          enum: [Draft, Active, Dissolving, Dissolved]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaginatedFundList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fund'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    FundDashboard:
+      type: object
+      properties:
+        fundId:
+          type: string
+          format: uuid
+        fundName:
+          type: string
+        state:
+          type: string
+        totalBalance:
+          type: number
+        memberCount:
+          type: integer
+        activeLoansCount:
+          type: integer
+        pendingApprovalsCount:
+          type: integer
+        overdueContributionsCount:
+          type: integer
+        overdueRepaymentsCount:
+          type: integer
+        thisMonthContributionsCollected:
+          type: number
+        thisMonthContributionsDue:
+          type: number
+
+    MemberSummary:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          type: string
+          enum: [Admin, Editor, Guest]
+        monthlyContributionAmount:
+          type: number
+          nullable: true
+        joinDate:
+          type: string
+          format: date
+          nullable: true
+        isActive:
+          type: boolean
+
+    PaginatedMemberList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemberSummary'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    ChangeRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [Admin, Editor, Guest]
+
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+        targetContact:
+          type: string
+        status:
+          type: string
+          enum: [Pending, Accepted, Declined, Expired]
+        invitedBy:
+          type: string
+          format: uuid
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    InviteMemberRequest:
+      type: object
+      required: [targetContact]
+      properties:
+        targetContact:
+          type: string
+          description: Phone number (E.164) or email address
+
+    AcceptInvitationRequest:
+      type: object
+      required: [monthlyContributionAmount]
+      properties:
+        monthlyContributionAmount:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+          description: Must be ≥ fund's minimumMonthlyContribution
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string

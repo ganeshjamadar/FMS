@@ -1,0 +1,674 @@
+openapi: 3.1.0
+info:
+  title: FundManager Loans API
+  description: Loan requests, approvals, repayments, and voting workflows.
+  version: 1.0.0
+
+servers:
+  - url: /api/funds/{fundId}/loans
+    description: Fund-scoped via API Gateway
+
+tags:
+  - name: Loans
+    description: Loan request and lifecycle
+  - name: Repayments
+    description: Repayment entry management
+  - name: Voting
+    description: Loan voting workflow
+
+paths:
+  /:
+    get:
+      operationId: listLoans
+      summary: List loans for the fund
+      tags: [Loans]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PendingApproval, Approved, Active, Closed, Rejected]
+        - name: borrowerId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated loan list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLoanList'
+
+    post:
+      operationId: requestLoan
+      summary: Submit a loan request (Editor only)
+      description: >
+        Creates a new loan in PendingApproval status. Validates against fund pool balance,
+        max loan cap, and max concurrent loans (FR-042).
+      tags: [Loans]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoanRequest'
+      responses:
+        '201':
+          description: Loan request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+        '409':
+          description: Fund pool insufficient, max loans exceeded, or fund not Active
+        '422':
+          description: Validation error
+
+  /{loanId}:
+    get:
+      operationId: getLoan
+      summary: Get loan details
+      tags: [Loans]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200':
+          description: Loan details with repayment schedule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanDetail'
+        '404':
+          description: Loan not found
+
+  /{loanId}/approve:
+    post:
+      operationId: approveLoan
+      summary: Approve a loan request (Fund Admin only)
+      description: >
+        Approves the loan, sets scheduled_installment, creates disbursement transaction,
+        and transitions loan from PendingApproval → Approved → Active (FR-043, FR-050).
+      tags: [Loans]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveLoanRequest'
+      responses:
+        '200':
+          description: Loan approved and disbursed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+        '409':
+          description: Insufficient fund balance or loan not in PendingApproval
+        '422':
+          description: Validation error
+
+  /{loanId}/reject:
+    post:
+      operationId: rejectLoan
+      summary: Reject a loan request (Fund Admin only)
+      tags: [Loans]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectLoanRequest'
+      responses:
+        '200':
+          description: Loan rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Loan'
+
+  /{loanId}/repayments:
+    get:
+      operationId: listRepayments
+      summary: List repayment entries for a loan
+      tags: [Repayments]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200':
+          description: Repayment schedule
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepaymentEntry'
+
+  /{loanId}/repayments/generate:
+    post:
+      operationId: generateRepayments
+      summary: Generate monthly repayment entries for active loans
+      description: >
+        Generates repayment entries for the specified month using reducing-balance formula.
+        Idempotent — re-running does not create duplicates (NFR-011).
+      tags: [Repayments]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [monthYear]
+              properties:
+                monthYear:
+                  type: integer
+                  description: YYYYMM format
+      responses:
+        '200':
+          description: Repayment entry generated or already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepaymentEntry'
+
+  /{loanId}/repayments/{repaymentId}/pay:
+    post:
+      operationId: recordRepayment
+      summary: Record a repayment payment
+      description: >
+        Records a repayment for a specific entry. Applies interest first, then principal (FR-068).
+        Requires Idempotency-Key. Uses optimistic concurrency (FR-035a).
+      tags: [Repayments]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+        - name: repaymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+          description: ETag of the RepaymentEntry for optimistic concurrency
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordRepaymentRequest'
+      responses:
+        '200':
+          description: Repayment recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepaymentResult'
+        '409':
+          description: Concurrency conflict or loan closed
+        '422':
+          description: Validation error
+
+  /{loanId}/voting:
+    post:
+      operationId: startVoting
+      summary: Start a voting session for a loan request (Fund Admin only)
+      tags: [Voting]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartVotingRequest'
+      responses:
+        '201':
+          description: Voting session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VotingSession'
+        '409':
+          description: Loan not in PendingApproval or voting already exists
+
+    get:
+      operationId: getVotingSession
+      summary: Get voting session details and current tally
+      tags: [Voting]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200':
+          description: Voting session with vote tally
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VotingSessionDetail'
+        '404':
+          description: No voting session for this loan
+
+  /{loanId}/voting/vote:
+    post:
+      operationId: castVote
+      summary: Cast a vote on a loan request (Editor only)
+      description: Each editor can cast one immutable vote per session.
+      tags: [Voting]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CastVoteRequest'
+      responses:
+        '200':
+          description: Vote recorded
+        '409':
+          description: Already voted or voting window closed
+
+  /{loanId}/voting/finalise:
+    post:
+      operationId: finaliseVoting
+      summary: Finalise voting session (Fund Admin only)
+      description: >
+        Admin reviews results and finalises as Approved or Rejected.
+        Override is allowed (FR-049) and logged in audit trail.
+      tags: [Voting]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FundId'
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinaliseVotingRequest'
+      responses:
+        '200':
+          description: Voting finalised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VotingSession'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    FundId:
+      name: fundId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LoanId:
+      name: loanId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    LoanRequest:
+      type: object
+      required: [principalAmount, requestedStartMonth]
+      properties:
+        principalAmount:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+        requestedStartMonth:
+          type: integer
+          description: YYYYMM format
+        purpose:
+          type: string
+          nullable: true
+
+    ApproveLoanRequest:
+      type: object
+      properties:
+        scheduledInstallment:
+          type: number
+          format: decimal
+          minimum: 0
+          default: 0
+          description: Monthly principal installment set by Admin; immutable after. Defaults to 0.
+
+    RejectLoanRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+
+    Loan:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fundId:
+          type: string
+          format: uuid
+        borrowerId:
+          type: string
+          format: uuid
+        borrowerName:
+          type: string
+        principalAmount:
+          type: number
+        outstandingPrincipal:
+          type: number
+        monthlyInterestRate:
+          type: number
+        scheduledInstallment:
+          type: number
+        minimumPrincipal:
+          type: number
+        requestedStartMonth:
+          type: integer
+        purpose:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PendingApproval, Approved, Active, Closed, Rejected]
+        approvedBy:
+          type: string
+          format: uuid
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        approvalDate:
+          type: string
+          format: date-time
+          nullable: true
+        disbursementDate:
+          type: string
+          format: date-time
+          nullable: true
+        closedDate:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    LoanDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/Loan'
+        - type: object
+          properties:
+            repaymentEntries:
+              type: array
+              items:
+                $ref: '#/components/schemas/RepaymentEntry'
+            votingSession:
+              $ref: '#/components/schemas/VotingSession'
+              nullable: true
+
+    PaginatedLoanList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Loan'
+        totalCount:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    RepaymentEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        loanId:
+          type: string
+          format: uuid
+        monthYear:
+          type: integer
+        interestDue:
+          type: number
+        principalDue:
+          type: number
+        totalDue:
+          type: number
+        amountPaid:
+          type: number
+        status:
+          type: string
+          enum: [Pending, Paid, Partial, Overdue]
+        dueDate:
+          type: string
+          format: date
+        paidDate:
+          type: string
+          format: date-time
+          nullable: true
+        version:
+          type: string
+          description: ETag for optimistic concurrency
+
+    RecordRepaymentRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          type: number
+          format: decimal
+          exclusiveMinimum: 0
+        description:
+          type: string
+          nullable: true
+
+    RepaymentResult:
+      type: object
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+        repaymentId:
+          type: string
+          format: uuid
+        interestPaid:
+          type: number
+        principalPaid:
+          type: number
+        excessAppliedToPrincipal:
+          type: number
+        newOutstandingPrincipal:
+          type: number
+        repaymentStatus:
+          type: string
+          enum: [Pending, Paid, Partial, Overdue]
+        loanStatus:
+          type: string
+          enum: [Active, Closed]
+
+    StartVotingRequest:
+      type: object
+      properties:
+        votingWindowHours:
+          type: integer
+          minimum: 24
+          maximum: 72
+          default: 48
+        thresholdType:
+          type: string
+          enum: [Majority, Percentage]
+          default: Majority
+        thresholdValue:
+          type: number
+          default: 50.00
+          description: Percentage threshold (used when thresholdType is Percentage)
+
+    VotingSession:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        loanId:
+          type: string
+          format: uuid
+        votingWindowStart:
+          type: string
+          format: date-time
+        votingWindowEnd:
+          type: string
+          format: date-time
+        thresholdType:
+          type: string
+        thresholdValue:
+          type: number
+        result:
+          type: string
+          enum: [Pending, Approved, Rejected, NoQuorum]
+        overrideUsed:
+          type: boolean
+        finalisedBy:
+          type: string
+          format: uuid
+          nullable: true
+        finalisedDate:
+          type: string
+          format: date-time
+          nullable: true
+
+    VotingSessionDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/VotingSession'
+        - type: object
+          properties:
+            approveCount:
+              type: integer
+            rejectCount:
+              type: integer
+            totalEligible:
+              type: integer
+            votes:
+              type: array
+              items:
+                $ref: '#/components/schemas/VoteSummary'
+
+    VoteSummary:
+      type: object
+      properties:
+        voterId:
+          type: string
+          format: uuid
+        voterName:
+          type: string
+        decision:
+          type: string
+          enum: [Approve, Reject]
+        castAt:
+          type: string
+          format: date-time
+
+    CastVoteRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [Approve, Reject]
+
+    FinaliseVotingRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [Approve, Reject]
+
+    ProblemDetails:
+      type: object
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
